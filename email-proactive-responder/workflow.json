@@ -1,0 +1,347 @@
+{
+  "name": "AI Email Proactive Responder — Auto-Draft Gmail Replies for Known Leads",
+  "nodes": [
+    {
+      "id": "trigger-ep1",
+      "name": "Trigger",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -400,
+        300
+      ],
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "_comment": "SETUP: This workflow is designed to be called from a parent workflow (e.g., an Email Manager that classifies incoming emails). The parent should pass the email object with fields: from, subject, snippet/textPlain/text, id/messageId."
+    },
+    {
+      "id": "extraer-ep1",
+      "name": "Extract Sender Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -200,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const raw = $input.first().json;\n\n// Extract sender email from various formats\nlet emailFrom = '';\nconst from = raw.from || raw.From || '';\nif (typeof from === 'string') {\n  const match = from.match(/<([^>]+)>/);\n  emailFrom = match ? match[1] : from;\n} else if (from.value && from.value[0]) {\n  emailFrom = from.value[0].address || '';\n}\n\n// Skip your own emails — add all your sending addresses here\nif (emailFrom === '[YOUR_EMAIL]') return [];\n\nconst subject = raw.subject || raw.Subject || '(no subject)';\nconst snippet = raw.snippet || raw.textPlain || raw.text || '';\nconst messageId = raw.id || raw.messageId || '';\n\nif (!emailFrom) return [];\n\nreturn [{ json: { email_from: emailFrom.replace(/'/g, \"''\"), subject, snippet: snippet.substring(0, 500), message_id: messageId } }];"
+      },
+      "_comment": "Extracts the sender email address from different email object formats (Gmail API, IMAP, etc). Skips emails from your own address to avoid self-processing loops. Replace [YOUR_EMAIL] with your sending address."
+    },
+    {
+      "id": "buscar-lead-ep1",
+      "name": "Lookup Lead by Email",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        20,
+        300
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SELECT lh.*, n.negocio AS negocio_n, n.pais AS pais_n, n.sector AS sector_n FROM leads_handoff lh LEFT JOIN negocios n ON lh.negocio_id::int = n.id WHERE (lh.email = '{{ $json.email_from }}' OR n.email = '{{ $json.email_from }}') AND lh.estado NOT IN ('error', 'duplicado') ORDER BY lh.fecha_handoff DESC NULLS LAST LIMIT 1",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "PostgreSQL Database"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "_comment": "SETUP: Connect your PostgreSQL credential. Expected schema for 'leads_handoff' table: id (serial PK), negocio (text) — business name, negocio_id (int) — FK to negocios table, pais (text) — country code e.g. 'US'/'ES', sector (text), estado (text) — lead status e.g. 'activo'/'cerrado', email (text), analisis_claude (text) — previous AI analysis, mensaje_respuesta (text) — last message sent/received, respuesta_sugerida (text) — last suggested response, fecha_handoff (timestamp). Expected schema for 'negocios' table: id (serial PK), negocio (text), pais (text), sector (text), email (text). Adapt column names to match your schema."
+    },
+    {
+      "id": "es-lead-ep1",
+      "name": "Is Known Lead?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "chk-ep",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "exists"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "_comment": "Only processes emails from known leads found in the database. Emails from unknown senders exit through the FALSE branch (no action). Connect the FALSE branch to a notification or logging node if you want to track unknown senders."
+    },
+    {
+      "id": "ai-analyze-ep1",
+      "name": "AI Analyze Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        460,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'system', content: 'You are an expert email assistant for [YOUR_BUSINESS]. You analyze incoming emails from leads/clients and generate professional reply drafts. Always respond with ONLY a valid JSON object: {\"asunto\": \"Re: ...\", \"cuerpo\": \"<p>HTML email body</p>\"}. Rules: respond to the SPECIFIC content of the email (never generic), professional and warm tone, do NOT propose calls or meetings unless the email explicitly requests one, do NOT include any email signature (it is appended automatically after).' }, { role: 'user', content: 'A lead/client of [YOUR_BUSINESS] sent an email. Analyze and generate a professional reply draft.\\n\\nLEAD DATA:\\nBusiness: ' + $('Lookup Lead by Email').first().json.negocio + '\\nCountry: ' + ($('Lookup Lead by Email').first().json.pais || $('Lookup Lead by Email').first().json.pais_n || 'US') + '\\nSector: ' + ($('Lookup Lead by Email').first().json.sector || $('Lookup Lead by Email').first().json.sector_n || 'general') + '\\nDeal status: ' + ($('Lookup Lead by Email').first().json.estado || 'active') + '\\nEmail: ' + $('Extract Sender Email').first().json.email_from + '\\nPrevious AI analysis: ' + ($('Lookup Lead by Email').first().json.analisis_claude || 'N/A') + '\\nLast registered message: ' + ($('Lookup Lead by Email').first().json.mensaje_respuesta || 'N/A').substring(0, 500) + '\\nPrevious suggested response: ' + ($('Lookup Lead by Email').first().json.respuesta_sugerida || 'N/A').substring(0, 300) + '\\n\\nINCOMING EMAIL:\\nSubject: ' + $('Extract Sender Email').first().json.subject + '\\nContent: ' + $('Extract Sender Email').first().json.snippet + '\\n\\nGenerate a valid JSON: {\"asunto\": \"Re: ...\", \"cuerpo\": \"<p>HTML email body</p>\"}\\nSender name: [YOUR_NAME] | [YOUR_BUSINESS]' }], temperature: 0.4, max_tokens: 1500 }) }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "OpenAI API Key"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "_comment": "SETUP: Create an HTTP Header Auth credential with Header Name: 'Authorization' and Header Value: 'Bearer YOUR_OPENAI_API_KEY'. Replace [YOUR_BUSINESS] and [YOUR_NAME] in the prompt. You can swap gpt-4o-mini for any model (gpt-4o, claude via proxy, DeepSeek, etc). Adjust temperature (0.0-1.0) and max_tokens as needed."
+    },
+    {
+      "id": "parsear-ep1",
+      "name": "Parse AI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const raw = ($input.first().json?.choices?.[0]?.message?.content || '').trim();\nconst lead = $('Lookup Lead by Email').first().json;\nconst emailData = $('Extract Sender Email').first().json;\n\nlet parsed;\ntry {\n  let cleaned = raw;\n  if (cleaned.startsWith('`')) cleaned = cleaned.replace(/^`{3}json?\\s*/, '').replace(/\\s*`{3}$/, '').trim();\n  const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n  if (match) parsed = JSON.parse(match[0]);\n} catch(e) {}\n\nif (!parsed) {\n  parsed = { asunto: 'Re: ' + emailData.subject, cuerpo: '<p>' + raw.replace(/\\n/g, '<br>') + '</p>' };\n}\n\n// Add your email signature HTML here\n// Example: const firma = '<br><br><table>...</table>';\n// Then append: parsed.cuerpo + firma\nconst firma = '';\n\nfunction esc(v) { return String(v || '').replace(/'/g, \"''\"); }\n\nreturn [{ json: {\n  asunto: parsed.asunto,\n  cuerpo_html: parsed.cuerpo + firma,\n  email_destino: emailData.email_from,\n  negocio: lead.negocio,\n  pais: lead.pais || lead.pais_n || 'US',\n  negocio_esc: esc(lead.negocio),\n  email_esc: esc(emailData.email_from),\n  pais_esc: esc(lead.pais || lead.pais_n || 'US'),\n  asunto_esc: esc(parsed.asunto),\n  cuerpo_esc: esc(parsed.cuerpo).substring(0, 2000),\n  snippet_entrante: emailData.snippet.substring(0, 200)\n} }];"
+      },
+      "_comment": "Parses the AI JSON response and extracts subject + HTML body. Handles markdown code fences and malformed JSON gracefully. Add your HTML email signature where indicated (firma variable). The esc() helper escapes single quotes for safe SQL insertion."
+    },
+    {
+      "id": "mime-ep1",
+      "name": "Build MIME Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        200
+      ],
+      "parameters": {
+        "jsCode": "const email = $input.first().json;\nconst mime = 'To: ' + email.email_destino + '\\r\\n' +\n  'Subject: =?UTF-8?B?' + Buffer.from(email.asunto, 'utf-8').toString('base64') + '?=\\r\\n' +\n  'Content-Type: text/html; charset=utf-8\\r\\n' +\n  'MIME-Version: 1.0\\r\\n' +\n  '\\r\\n' +\n  email.cuerpo_html;\nconst raw = Buffer.from(mime, 'utf-8').toString('base64').replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');\nreturn [{ json: { ...email, raw_message: raw } }];"
+      },
+      "_comment": "Builds a RFC 2822 MIME message with UTF-8 encoded subject (Base64) and HTML body, then encodes it as URL-safe Base64 for the Gmail API drafts endpoint. This is required because the Gmail API expects raw MIME in Base64url format."
+    },
+    {
+      "id": "draft-ep1",
+      "name": "Create Gmail Draft",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1120,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://gmail.googleapis.com/gmail/v1/users/me/drafts",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "gmailOAuth2",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ message: { raw: $json.raw_message } }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "Gmail OAuth2 Account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "_comment": "SETUP: Connect your Gmail OAuth2 credential. This creates a DRAFT (not a sent email) so you can review before sending. The draft appears in your Gmail Drafts folder ready to review, edit, and send manually. Requires Gmail API scope: https://www.googleapis.com/auth/gmail.compose"
+    },
+    {
+      "id": "guardar-ep1",
+      "name": "Save Pending Action",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        1340,
+        200
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=INSERT INTO acciones_pendientes (tipo, lead_nombre, lead_email, pais, mensaje_borrador, asunto_email, estado) VALUES ('email_draft', '{{ $('Parse AI Response').first().json.negocio_esc }}', '{{ $('Parse AI Response').first().json.email_esc }}', '{{ $('Parse AI Response').first().json.pais_esc }}', '{{ $('Parse AI Response').first().json.cuerpo_esc }}', '{{ $('Parse AI Response').first().json.asunto_esc }}', 'pendiente') RETURNING id",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "PostgreSQL Database"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "_comment": "SETUP: Expected schema for 'acciones_pendientes' table: id (serial PK), tipo (text) — action type e.g. 'email_draft'/'whatsapp', lead_nombre (text) — business/lead name, lead_email (text), pais (text) — country code, mensaje_borrador (text) — draft body content, asunto_email (text) — email subject, estado (text) — 'pendiente'/'aprobado'/'rechazado'/'enviado'. This table acts as an approval queue: drafts stay 'pendiente' until you approve them via a separate approval workflow or UI."
+    },
+    {
+      "id": "notificar-ep1",
+      "name": "Notify Owner",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1560,
+        200
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "[YOUR_NOTIFICATION_API_URL]",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: '[YOUR_PHONE]', text: '*EMAIL FROM ' + $('Parse AI Response').first().json.negocio + ' (' + $('Parse AI Response').first().json.pais + '):*\\n\\n_Subject:_ ' + $('Extract Sender Email').first().json.subject + '\\n_From:_ ' + $('Extract Sender Email').first().json.email_from + '\\n_Message:_ ' + $('Parse AI Response').first().json.snippet_entrante + '\\n\\n_Reply draft created in Gmail._\\nSubject: ' + $('Parse AI Response').first().json.asunto + '\\nAction ID: ' + $json.id }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "Notification API Auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "_comment": "SETUP: This sends a notification when a draft is ready for review. Default format is for Evolution API (WhatsApp). Replace [YOUR_NOTIFICATION_API_URL] with your messaging endpoint — examples: Evolution API: http://your-server:port/message/sendText/YOUR_INSTANCE, Telegram: https://api.telegram.org/botTOKEN/sendMessage (change body to {chat_id, text}), Slack: https://hooks.slack.com/services/YOUR/WEBHOOK/URL (change body to {text}). Replace [YOUR_PHONE] with the recipient phone number."
+    },
+    {
+      "id": "sticky-memory-note",
+      "name": "Optional: Memory Injection",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1720,
+        120
+      ],
+      "parameters": {
+        "content": "## Optional: AI Memory Injection\n\nIf you use an AI assistant (like an AI Agent workflow) that manages your leads, you can inject context about this email interaction into its memory.\n\nAdd 2 nodes after 'Notify Owner':\n1. **memoryRedisChat** — connects to your Redis instance with the assistant's session key\n2. **memoryManager** (mode: insert) — injects a summary message like: \"[AUTO] Lead X sent email about Y. Draft reply created (Action ID Z).\"\n\nThis way your AI assistant always knows about recent lead interactions without manual updates.\n\nRequires: @n8n/n8n-nodes-langchain package + Redis instance."
+      }
+    }
+  ],
+  "connections": {
+    "Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Sender Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Sender Email": {
+      "main": [
+        [
+          {
+            "node": "Lookup Lead by Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Lead by Email": {
+      "main": [
+        [
+          {
+            "node": "Is Known Lead?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Known Lead?": {
+      "main": [
+        [
+          {
+            "node": "AI Analyze Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "AI Analyze Email": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Build MIME Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build MIME Message": {
+      "main": [
+        [
+          {
+            "node": "Create Gmail Draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Gmail Draft": {
+      "main": [
+        [
+          {
+            "node": "Save Pending Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Pending Action": {
+      "main": [
+        [
+          {
+            "node": "Notify Owner",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

@@ -1,0 +1,949 @@
+{
+  "name": "AI Email Manager — Smart Gmail Classifier with WhatsApp Notifications",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "filters": {
+          "readStatus": "unread",
+          "sender": "(-from:[YOUR_EMAIL])"
+        }
+      },
+      "id": "trigger-v3",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -208,
+        816
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "Gmail OAuth2"
+        }
+      },
+      "_comment": "SETUP: Connect your Gmail OAuth2 credential. Polls every minute for unread emails. The sender filter excludes your own email address to avoid processing sent emails."
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {}
+      },
+      "id": "llm-v3",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [
+        536,
+        736
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "OpenAI API"
+        }
+      },
+      "_comment": "SETUP: Connect your OpenAI API credential. Used by the Text Classifier to categorize emails. You can swap this for any LLM supported by n8n (Claude, DeepSeek, Ollama, etc.)."
+    },
+    {
+      "parameters": {
+        "inputText": "=De: {{ $json.From }}\nAsunto: {{ $json.Subject }}\nSnippet: {{ $json.snippet }}",
+        "categories": {
+          "categories": [
+            {
+              "category": "Responder",
+              "description": "Requires your response. Clients, partners, leads, personal emails needing action. Add your own partner/client names here for better classification."
+            },
+            {
+              "category": "Oportunidad",
+              "description": "Responses from EXTERNAL PROSPECTS. Does NOT include internal emails or error notifications."
+            },
+            {
+              "category": "Notificacion",
+              "description": "Automated alerts, workflow errors, payment confirmations, invoices, bounces."
+            },
+            {
+              "category": "Marketing",
+              "description": "Promotional emails, cold sales emails, unsolicited newsletters, offers, discounts."
+            },
+            {
+              "category": "Reunion",
+              "description": "Meeting invitations, calls, Google Meet, Zoom, calendar events."
+            },
+            {
+              "category": "FYI",
+              "description": "Informational, no action needed. Tool updates, subscribed newsletters, social media notifications."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "classifier-v3",
+      "name": "Clasificador Email",
+      "type": "@n8n/n8n-nodes-langchain.textClassifier",
+      "typeVersion": 1,
+      "position": [
+        464,
+        384
+      ],
+      "_comment": "CORE LOGIC: AI-powered text classifier with 6 categories. Customize the category descriptions to match your business context. Add partner/client names to the Responder category for better classification accuracy."
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $('Gmail Trigger').item.json.id }}",
+        "labelIds": "Label_2"
+      },
+      "id": "gmail-label-responder",
+      "name": "Label Responder",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        816,
+        -96
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "Gmail OAuth2"
+        }
+      },
+      "_comment": "SETUP: Create Gmail labels matching these categories. Update the labelIds to match YOUR Gmail label IDs. Find your label IDs via Gmail API or n8n Gmail node with Get All Labels operation."
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $('Gmail Trigger').item.json.id }}",
+        "labelIds": "Label_4"
+      },
+      "id": "gmail-label-oportunidad",
+      "name": "Label Oportunidad",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        816,
+        96
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "Gmail OAuth2"
+        }
+      },
+      "_comment": "SETUP: Create Gmail labels matching these categories. Update the labelIds to match YOUR Gmail label IDs. Find your label IDs via Gmail API or n8n Gmail node with Get All Labels operation."
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $('Gmail Trigger').item.json.id }}",
+        "labelIds": "Label_3"
+      },
+      "id": "gmail-label-notificacion",
+      "name": "Label Notificacion",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        816,
+        288
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "Gmail OAuth2"
+        }
+      },
+      "_comment": "SETUP: Create Gmail labels matching these categories. Update the labelIds to match YOUR Gmail label IDs. Find your label IDs via Gmail API or n8n Gmail node with Get All Labels operation."
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $('Gmail Trigger').item.json.id }}",
+        "labelIds": "Label_6"
+      },
+      "id": "gmail-label-marketing",
+      "name": "Label Marketing",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        816,
+        480
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "Gmail OAuth2"
+        }
+      },
+      "_comment": "SETUP: Create Gmail labels matching these categories. Update the labelIds to match YOUR Gmail label IDs. Find your label IDs via Gmail API or n8n Gmail node with Get All Labels operation."
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $('Gmail Trigger').item.json.id }}",
+        "labelIds": "Label_7"
+      },
+      "id": "gmail-label-reunion",
+      "name": "Label Reunion",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        816,
+        672
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "Gmail OAuth2"
+        }
+      },
+      "_comment": "SETUP: Create Gmail labels matching these categories. Update the labelIds to match YOUR Gmail label IDs. Find your label IDs via Gmail API or n8n Gmail node with Get All Labels operation."
+    },
+    {
+      "parameters": {
+        "operation": "addLabels",
+        "messageId": "={{ $('Gmail Trigger').item.json.id }}",
+        "labelIds": "Label_5"
+      },
+      "id": "gmail-label-fyi",
+      "name": "Label FYI",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        816,
+        864
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "Gmail OAuth2"
+        }
+      },
+      "_comment": "SETUP: Create Gmail labels matching these categories. Update the labelIds to match YOUR Gmail label IDs. Find your label IDs via Gmail API or n8n Gmail node with Get All Labels operation."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "[YOUR_EVOLUTION_API_URL]/message/sendText/[YOUR_INSTANCE_NAME]",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: '[YOUR_PHONE_NUMBER]', text: '*Email Manager*\\n\\n*Requiere respuesta*\\nDe: ' + $('Gmail Trigger').item.json.From + '\\nAsunto: ' + $('Gmail Trigger').item.json.Subject + '\\n\\n' + ($('Gmail Trigger').item.json.snippet || '').substring(0, 200) }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "wa-notify-responder",
+      "name": "WA Notif Responder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        -96
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "WhatsApp API Auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "_comment": "SETUP: Sends WhatsApp notification via Evolution API (or any WhatsApp Business API). Update the URL, instance name, and your phone number. You can replace this with Telegram Bot, Slack webhook, or any notification service."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "[YOUR_EVOLUTION_API_URL]/message/sendText/[YOUR_INSTANCE_NAME]",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: '[YOUR_PHONE_NUMBER]', text: '*Email Manager*\\n\\n*OPORTUNIDAD - Lead/Prospecto*\\nDe: ' + $('Gmail Trigger').item.json.From + '\\nAsunto: ' + $('Gmail Trigger').item.json.Subject + '\\n\\n' + ($('Gmail Trigger').item.json.snippet || '').substring(0, 200) }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "wa-notify-oportunidad",
+      "name": "WA Notif Oportunidad",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        96
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "WhatsApp API Auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "_comment": "SETUP: Sends WhatsApp notification via Evolution API (or any WhatsApp Business API). Update the URL, instance name, and your phone number. You can replace this with Telegram Bot, Slack webhook, or any notification service."
+    },
+    {
+      "parameters": {
+        "operation": "removeLabels",
+        "messageId": "={{ $('Gmail Trigger').item.json.id }}",
+        "labelIds": "INBOX"
+      },
+      "id": "gmail-archive-marketing",
+      "name": "Archivar Marketing",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1040,
+        624
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "Gmail OAuth2"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "_comment": "ACTION: Removes the INBOX label from marketing/spam/tool emails, effectively archiving them. You can also add a label or permanently delete if preferred."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "[YOUR_EVOLUTION_API_URL]/message/sendText/[YOUR_INSTANCE_NAME]",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{  JSON.stringify({ number: '[YOUR_PHONE_NUMBER]', text: 'Email Manager\\\\n\\\\nNOTIFICACI\\u00d3N\\\\nDe: ' + $('Gmail Trigger').item.json.From + '\\\\nAsunto: ' + $('Gmail Trigger').item.json.Subject + '\\\\n\\\\n' + ($('Gmail Trigger').item.json.snippet || '').substring(0, 200) }) }} }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "4e6be7a1-432a-452a-a6d3-8b4bc037673d",
+      "name": "WA Notif Notificacion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        288
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "WhatsApp API Auth"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "_comment": "SETUP: Sends WhatsApp notification via Evolution API (or any WhatsApp Business API). Update the URL, instance name, and your phone number. You can replace this with Telegram Bot, Slack webhook, or any notification service."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "[YOUR_EVOLUTION_API_URL]/message/sendText/[YOUR_INSTANCE_NAME]",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: '[YOUR_PHONE_NUMBER]', text: '*Email Manager*\\n\\nREUNION detectada\\nDe: ' + $('Gmail Trigger').item.json.From + '\\nAsunto: ' + $('Gmail Trigger').item.json.Subject + '\\n\\n' + ($('Gmail Trigger').item.json.snippet || '').substring(0, 200) }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "10f2c9eb-4ed9-4c70-a1c1-cae7983d6c84",
+      "name": "WA Notif Reunion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        816
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "WhatsApp API Auth"
+        }
+      },
+      "_comment": "SETUP: Sends WhatsApp notification via Evolution API (or any WhatsApp Business API). Update the URL, instance name, and your phone number. You can replace this with Telegram Bot, Slack webhook, or any notification service."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "[YOUR_EVOLUTION_API_URL]/message/sendText/[YOUR_INSTANCE_NAME]",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: '[YOUR_PHONE_NUMBER]', text: '*Email Manager*\\n\\nFYI - Para tu informaci\\u00f3n\\nDe: ' + $('Gmail Trigger').item.json.From + '\\nAsunto: ' + $('Gmail Trigger').item.json.Subject + '\\n\\n' + ($('Gmail Trigger').item.json.snippet || '').substring(0, 150) }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "36caa60e-b681-4455-af83-efaa677a1a34",
+      "name": "WA Notif FYI",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        1008
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "WhatsApp API Auth"
+        }
+      },
+      "_comment": "SETUP: Sends WhatsApp notification via Evolution API (or any WhatsApp Business API). Update the URL, instance name, and your phone number. You can replace this with Telegram Bot, Slack webhook, or any notification service."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": false,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "is-promo",
+              "leftValue": "={{ $json.labelIds.join(',') }}",
+              "rightValue": "CATEGORY_PROMOTIONS",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "is-social",
+              "leftValue": "={{ $json.labelIds.join(',') }}",
+              "rightValue": "CATEGORY_SOCIAL",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "de118d9e-2939-4489-a191-8606c2764c09",
+      "name": "Es Spam",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        16,
+        720
+      ],
+      "_comment": "FILTER: Catches Gmail Promotions and Social categories before they reach the AI classifier. Saves LLM API calls on obvious non-business emails."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": false,
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "vercel",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              },
+              "id": "condition-1775552017027-v2jsg26bh"
+            },
+            {
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "supabase",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              },
+              "id": "condition-1775552017027-z5vet806r"
+            },
+            {
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "github",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              },
+              "id": "condition-1775552017027-xubz8lrsk"
+            },
+            {
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "n8n",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              },
+              "id": "condition-1775552017027-qha8zi5mz"
+            },
+            {
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "openai",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              },
+              "id": "condition-1775552017027-ofwurov8g"
+            },
+            {
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "anthropic",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              },
+              "id": "condition-1775552017027-lqz7lylyx"
+            },
+            {
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "hostinger",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              },
+              "id": "condition-1775552017027-cjx19lw8w"
+            },
+            {
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "stripe",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              },
+              "id": "condition-1775552017027-id02nmzii"
+            },
+            {
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "cloudflare",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              },
+              "id": "condition-1775552017027-ujlhiidw4"
+            },
+            {
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "notion",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              },
+              "id": "condition-1775552017027-wuzljpj5z"
+            },
+            {
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "sentry",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              },
+              "id": "condition-1775552017027-mk214ahl7"
+            },
+            {
+              "leftValue": "={{ $json.From }}",
+              "rightValue": "deepseek",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              },
+              "id": "condition-1775552017027-t9na2cv24"
+            }
+          ],
+          "combinator": "or"
+        },
+        "options": {}
+      },
+      "id": "07eeb0b3-3c0a-4eed-bb36-2c74ad7c3a5f",
+      "name": "Es Herramienta Stack",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        240,
+        648
+      ],
+      "_comment": "FILTER: Catches emails from your dev/SaaS tools (Vercel, GitHub, Stripe, etc.) and auto-archives them. Customize the sender list to match YOUR tool stack."
+    },
+    {
+      "id": "dc08647f-f8e2-4059-b1ba-70b872e81c00",
+      "name": "Es Lead Conocido?",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        920,
+        -200
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SELECT id FROM [YOUR_LEADS_TABLE] WHERE email = '{{ ($json.from && $json.from.value && $json.from.value[0] ? $json.from.value[0].address : '').replace(/'/g, \"''\") }}' AND estado NOT IN ('error_falso_positivo', 'error_match_incorrecto', 'duplicado') LIMIT 1",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "_comment": "SETUP: Create a leads/contacts table in your database. Update the table name and query to match your schema. The query checks if the email sender is a known lead to skip the generic WA notification (your lead management system handles those separately)."
+    },
+    {
+      "id": "d41ab20d-f516-4b5e-afe2-1c05e9e855a1",
+      "name": "Skip si Lead",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1140,
+        -200
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "chk-skip",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "exists"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "_comment": "LOGIC: If the sender is a known lead in your database, skip the generic WA notification. Your lead management system handles those with richer context. Remove this node and its upstream Postgres node if you do not have a separate lead management workflow."
+    },
+    {
+      "id": "9643d7fd-5519-4bee-a1f2-3846a2253313",
+      "name": "Es Lead Conocido 2?",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        920,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "=SELECT id FROM [YOUR_LEADS_TABLE] WHERE email = '{{ ($json.from && $json.from.value && $json.from.value[0] ? $json.from.value[0].address : '').replace(/'/g, \"''\") }}' AND estado NOT IN ('error_falso_positivo', 'error_match_incorrecto', 'duplicado') LIMIT 1",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "[YOUR_CREDENTIAL_ID]",
+          "name": "Postgres account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "alwaysOutputData": true,
+      "_comment": "SETUP: Create a leads/contacts table in your database. Update the table name and query to match your schema. The query checks if the email sender is a known lead to skip the generic WA notification (your lead management system handles those separately)."
+    },
+    {
+      "id": "8545e9de-7786-47be-819d-286e37cd391f",
+      "name": "Skip si Lead 2",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1140,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "version": 2,
+            "leftValue": "",
+            "caseSensitive": true,
+            "typeValidation": "loose"
+          },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "chk-skip2",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "number",
+                "operation": "exists"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "_comment": "LOGIC: If the sender is a known lead in your database, skip the generic WA notification. Your lead management system handles those with richer context. Remove this node and its upstream Postgres node if you do not have a separate lead management workflow."
+    },
+    {
+      "parameters": {
+        "content": "## Sub-Workflow Integration Point\n\nTwo executeWorkflow nodes were removed from this template:\n\n1. **Lead Detection** — Originally detected when an incoming email was a prospect responding to outreach\n2. **Proactive Email Processor** — Originally triggered an AI assistant to draft responses for known leads\n\nThese connected to a CRM/lead management system. You can add your own sub-workflows here by:\n- Adding an Execute Workflow node after the Gmail Trigger\n- Connecting it in parallel to the Es Spam node\n- Referencing your own lead management workflow ID\n\nThe Gmail Trigger outputs the full email object which you can pass to any sub-workflow.",
+        "width": 400,
+        "height": 340,
+        "color": 4
+      },
+      "id": "sticky-subworkflows",
+      "name": "Sub-Workflow Integration",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        1000
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## AI Email Manager — Setup Guide\n\n**Step 1:** Create 6 Gmail labels: Responder, Oportunidad, Notificacion, Marketing, Reunion, FYI\n\n**Step 2:** Update all Label nodes with your Gmail label IDs\n\n**Step 3:** Connect your Gmail OAuth2 and OpenAI API credentials\n\n**Step 4:** Configure WhatsApp notifications (Evolution API, Twilio, or replace with Telegram/Slack)\n\n**Step 5:** (Optional) Connect a Postgres/MySQL database for lead-skip logic, or remove those nodes if you don't need it\n\n**Step 6:** Customize the 'Es Herramienta Stack' filter with YOUR tool/SaaS email senders\n\n**Step 7:** Customize classifier categories in the 'Clasificador Email' node with your business context and partner names",
+        "width": 400,
+        "height": 400,
+        "color": 6
+      },
+      "id": "sticky-setup",
+      "name": "Setup Guide",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -660,
+        384
+      ]
+    }
+  ],
+  "connections": {
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Clasificador Email",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Clasificador Email": {
+      "main": [
+        [
+          {
+            "node": "Label Responder",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Label Oportunidad",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Label Notificacion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Label Marketing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Label Reunion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Label FYI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label Marketing": {
+      "main": [
+        [
+          {
+            "node": "Archivar Marketing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label Notificacion": {
+      "main": [
+        [
+          {
+            "node": "WA Notif Notificacion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label Reunion": {
+      "main": [
+        [
+          {
+            "node": "WA Notif Reunion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label FYI": {
+      "main": [
+        [
+          {
+            "node": "WA Notif FYI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Es Spam",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Es Spam": {
+      "main": [
+        [
+          {
+            "node": "Es Herramienta Stack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Clasificador Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Es Herramienta Stack": {
+      "main": [
+        [
+          {
+            "node": "Clasificador Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Archivar Marketing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label Responder": {
+      "main": [
+        [
+          {
+            "node": "Es Lead Conocido?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Es Lead Conocido?": {
+      "main": [
+        [
+          {
+            "node": "Skip si Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip si Lead": {
+      "main": [
+        [],
+        [
+          {
+            "node": "WA Notif Responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Label Oportunidad": {
+      "main": [
+        [
+          {
+            "node": "Es Lead Conocido 2?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Es Lead Conocido 2?": {
+      "main": [
+        [
+          {
+            "node": "Skip si Lead 2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Skip si Lead 2": {
+      "main": [
+        [],
+        [
+          {
+            "node": "WA Notif Oportunidad",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "binaryMode": "separate"
+  }
+}

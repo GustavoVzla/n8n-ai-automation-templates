@@ -1,0 +1,182 @@
+{
+  "name": "AI Error Auto-Diagnosis & Notification",
+  "nodes": [
+    {
+      "id": "error-trigger-1",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        250,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "code-error-context-1",
+      "name": "Prepare Error Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const error = $input.first().json;\nconst workflowName = error.workflow?.name || 'Unknown';\nconst workflowId = error.workflow?.id || '';\nconst executionId = error.execution?.id || '';\nconst errorMessage = error.execution?.error?.message || 'No error message';\nconst errorNode = error.execution?.error?.node?.name || 'Unknown node';\nconst errorNodeType = error.execution?.error?.node?.type || '';\nconst errorNodeId = error.execution?.error?.node?.id || '';\nconst errorStack = (error.execution?.error?.stack || '').substring(0, 800);\nconst errorDescription = error.execution?.error?.description || '';\nconst errorContext = JSON.stringify(error.execution?.error?.context || {}).substring(0, 300);\nconst httpCode = error.execution?.error?.httpCode || '';\n\nconst runData = error.execution?.data?.resultData?.runData || {};\nlet silentErrors = [];\nlet executedNodes = [];\nlet failedNodes = [];\n\nfor (const [nodeName, runs] of Object.entries(runData)) {\n  executedNodes.push(nodeName);\n  for (const run of runs) {\n    if (run.error) {\n      failedNodes.push({\n        node: nodeName,\n        message: (run.error.message || '').substring(0, 200),\n        description: (run.error.description || '').substring(0, 200),\n        httpCode: run.error.httpCode || ''\n      });\n    }\n    const mainData = run.data?.main || [[]];\n    const totalItems = mainData.reduce((sum, branch) => sum + (branch?.length || 0), 0);\n    if (totalItems === 0 && !run.error) {\n      silentErrors.push(nodeName + ': empty output');\n    }\n  }\n}\n\nconst nodeErrorsText = failedNodes.map(e =>\n  '- ' + e.node + ': ' + e.message +\n  (e.httpCode ? ' (HTTP ' + e.httpCode + ')' : '') +\n  (e.description ? ' | ' + e.description : '')\n).join('\\n');\n\nconst silentText = silentErrors.join('\\n');\n\nconst prompt = 'You are an n8n expert. A workflow failed. Diagnose in detail.\\n\\n' +\n  'MAIN ERROR:\\n' +\n  '- Workflow: ' + workflowName + ' (ID: ' + workflowId + ')\\n' +\n  '- Execution: ' + executionId + '\\n' +\n  '- Node: ' + errorNode + ' (type: ' + errorNodeType + ')\\n' +\n  '- Error: ' + errorMessage + '\\n' +\n  '- Description: ' + errorDescription + '\\n' +\n  '- HTTP Code: ' + httpCode + '\\n' +\n  '- Stack: ' + errorStack.substring(0, 400) + '\\n' +\n  '- Context: ' + errorContext + '\\n\\n' +\n  'FAILED NODES (' + failedNodes.length + '):\\n' +\n  (nodeErrorsText || 'Only the main error') + '\\n\\n' +\n  'NODES WITH EMPTY OUTPUT:\\n' +\n  (silentText || 'None') + '\\n\\n' +\n  'EXECUTED NODES: ' + executedNodes.join(', ') + '\\n\\n' +\n  'Respond ONLY JSON: {\"diagnosis\": \"...\", \"root_cause\": \"...\", \"severity\": \"critical/high/medium/low\", \"suggested_action\": \"concrete action for the admin\", \"secondary_errors\": \"... or null\"}';\n\nreturn [{ json: {\n  prompt,\n  workflowName, workflowId, executionId,\n  errorMessage, errorNode, errorNodeType, errorNodeId,\n  errorDescription, httpCode,\n  failedNodesCount: failedNodes.length,\n  silentErrorsCount: silentErrors.length,\n  executedNodesCount: executedNodes.length,\n  nodeErrorsDetail: nodeErrorsText,\n  originalError: error\n} }];\n"
+      }
+    },
+    {
+      "id": "http-ai-diagnose-1",
+      "name": "AI Diagnose Error",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        750,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'gpt-4o-mini', messages: [{ role: 'user', content: $json.prompt }], temperature: 0.3, max_tokens: 500 }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "[YOUR_OPENAI_CREDENTIAL_ID]",
+          "name": "OpenAI API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "_comment": "SETUP: Create an HTTP Header Auth credential with Header Name: 'Authorization' and Header Value: 'Bearer YOUR_OPENAI_API_KEY'. Or replace this node with an AI Agent node using your preferred LLM."
+    },
+    {
+      "id": "code-parse-fix-1",
+      "name": "Parse Diagnosis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const prev = $('Prepare Error Context').first().json;\nconst raw = ($input.first().json?.choices?.[0]?.message?.content || $input.first().json.stdout || '').trim();\n\nlet diagnosis;\ntry {\n  let cleaned = raw;\n  if (cleaned.startsWith('```')) {\n    cleaned = cleaned.replace(/^```json?\\n?/, '').replace(/\\n?```$/, '').trim();\n  }\n  const match = cleaned.match(/\\{[\\s\\S]*\\}/);\n  if (match) diagnosis = JSON.parse(match[0]);\n} catch(e) {}\n\nif (!diagnosis) {\n  diagnosis = {\n    diagnosis: 'AI could not analyze the error automatically',\n    root_cause: prev.errorMessage,\n    severity: 'high',\n    suggested_action: 'Manually review node ' + prev.errorNode + ' in ' + prev.workflowName,\n    secondary_errors: null\n  };\n}\n\nif (!diagnosis.suggested_action) {\n  diagnosis.suggested_action = diagnosis.recommendation || 'Review manually';\n}\n\nreturn [{ json: { ...prev, ...diagnosis } }];\n"
+      }
+    },
+    {
+      "id": "http-wa-error-1",
+      "name": "Notify WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1250,
+        300
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "[YOUR_EVOLUTION_API_URL]/message/sendText/[YOUR_INSTANCE_NAME]",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ number: '[YOUR_PHONE_NUMBER]', text: '\\u26a0\\ufe0f *Error: ' + $json.workflowName + '*\\n\\nNode: ' + $json.errorNode + '\\nError: ' + $json.errorMessage + '\\n\\n*AI Diagnosis:* ' + $json.diagnosis + '\\n*Root cause:* ' + $json.root_cause + '\\n*Severity:* ' + $json.severity + '\\n*Action:* ' + ($json.suggested_action || 'Review manually') }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "[YOUR_EVOLUTION_API_CREDENTIAL_ID]",
+          "name": "Evolution API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "_comment": "SETUP: Configure your Evolution API URL, instance name, and phone number. Or replace with any messaging API (Telegram, Slack, etc.)"
+    },
+    {
+      "id": "gmail-error-fixed-1",
+      "name": "Send Email Diagnosis",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1250,
+        500
+      ],
+      "parameters": {
+        "sendTo": "[YOUR_EMAIL]",
+        "subject": "={{ $json.suggested_action ? '\\u2705' : '\\u26a0\\ufe0f' }} {{ $json.severity.toUpperCase() }}: {{ $json.workflowName }} - {{ $json.errorNode }}",
+        "message": "=<div style=\"font-family:Arial,sans-serif;max-width:650px;\"><h2 style=\"color:{{ $json.suggested_action ? '#16a34a' : '#dc2626' }};\">Workflow Error Report</h2><table style=\"font-size:14px;border-collapse:collapse;width:100%;\" border=\"0\" cellpadding=\"8\"><tr><td style=\"font-weight:bold;color:#666;width:140px;\">Workflow:</td><td>{{ $json.workflowName }}</td></tr><tr><td style=\"font-weight:bold;color:#666;\">Node:</td><td>{{ $json.errorNode }} ({{ $json.errorNodeType }})</td></tr><tr><td style=\"font-weight:bold;color:#666;\">Error:</td><td style=\"color:#dc2626;\">{{ $json.errorMessage }}</td></tr>{{ $json.errorDescription ? '<tr><td style=\"font-weight:bold;color:#666;\">Detail:</td><td>' + $json.errorDescription + '</td></tr>' : '' }}{{ $json.httpCode ? '<tr><td style=\"font-weight:bold;color:#666;\">HTTP Code:</td><td>' + $json.httpCode + '</td></tr>' : '' }}<tr><td style=\"font-weight:bold;color:#666;\">Severity:</td><td style=\"font-weight:bold;color:{{ $json.severity === 'critical' ? '#dc2626' : $json.severity === 'high' ? '#ea580c' : '#666' }};\">{{ $json.severity.toUpperCase() }}</td></tr></table><hr style=\"margin:16px 0;\"><h3>AI Diagnosis</h3><p><strong>Root cause:</strong> {{ $json.root_cause }}</p><p><strong>Diagnosis:</strong> {{ $json.diagnosis }}</p><p><strong>Suggested action:</strong> {{ $json.suggested_action }}</p>{{ $json.secondary_errors ? '<p><strong>Secondary errors:</strong> ' + $json.secondary_errors + '</p>' : '' }}<hr style=\"margin:16px 0;\"><h3>Execution Summary</h3><table style=\"font-size:13px;\" border=\"0\" cellpadding=\"6\"><tr><td>Nodes executed:</td><td><strong>{{ $json.executedNodesCount }}</strong></td></tr><tr><td>Nodes with error:</td><td style=\"color:#dc2626;\"><strong>{{ $json.failedNodesCount }}</strong></td></tr><tr><td>Empty output:</td><td style=\"color:#ea580c;\"><strong>{{ $json.silentErrorsCount }}</strong></td></tr></table>{{ $json.nodeErrorsDetail ? '<h4>Error details:</h4><pre style=\"background:#f5f5f5;padding:12px;font-size:12px;\">' + $json.nodeErrorsDetail + '</pre>' : '' }}</div>",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "[YOUR_GMAIL_CREDENTIAL_ID]",
+          "name": "Gmail account"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "_comment": "SETUP: Connect your Gmail OAuth2 credential and set your email address."
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Prepare Error Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Error Context": {
+      "main": [
+        [
+          {
+            "node": "AI Diagnose Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Diagnose Error": {
+      "main": [
+        [
+          {
+            "node": "Parse Diagnosis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Diagnosis": {
+      "main": [
+        [
+          {
+            "node": "Notify WhatsApp",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Send Email Diagnosis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
